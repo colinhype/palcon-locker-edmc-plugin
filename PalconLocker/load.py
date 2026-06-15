@@ -37,6 +37,7 @@ all_sectors = {}
 tracked_missions = {}
 status_light = None
 status_label = None
+last_sector_refresh = 0
 
 STATUS_CONNECTED = "connected"
 STATUS_UPLOADING = "uploading"
@@ -623,6 +624,7 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
 
 
 def plugin_start3(plugin_dir):
+    global last_sector_refresh
     load_settings()
     load_tracked_missions()
     last_sector_refresh = 0
