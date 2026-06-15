@@ -10,6 +10,7 @@ import requests
 import tkinter as tk
 import time
 from datetime import datetime, timezone
+from collections import deque
 
 try:
     from edmc_logging import getLogger
@@ -21,12 +22,13 @@ except ImportError:
 log = getLogger(__name__)
 
 __author__ = "Colinhype"
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 __description__ = "Feeds PalCon Locker CMDR activity via PHP API, with DB-backed sector watchlists."
 
 NOTIFY_URL = "https://palconlocker.com/api/notify.php"
 SECTORS_URL = "https://palconlocker.com/api/sectors.php"
 ACTIVITY_WEBHOOK_URL = "https://discord.com/api/webhooks/1514416142972747776/-j2Y2-VWrxO7Lg3gGVV1R-GZcAOxmMyexlXfFVFrCDV6eYbER0B5RpAWRBDB7_BNqVmP"
+LATEST_URL = "https://palconlocker.com/latest.json"
 
 PLUGIN_DIR = os.path.dirname(__file__)
 SETTINGS_FILE = os.path.join(PLUGIN_DIR, "palcon_settings.json")
@@ -37,6 +39,10 @@ all_sectors = {}
 tracked_missions = {}
 status_light = None
 status_label = None
+last_sector_refresh = 0
+last_version_check = 0
+status_queue = deque()
+status_busy = False
 
 STATUS_CONNECTED = "connected"
 STATUS_UPLOADING = "uploading"
@@ -194,23 +200,13 @@ def set_status(state):
 
 
 def flash_upload():
-    if not status_light or not status_label:
+    if not status_light:
         return
 
     try:
-        status_label.configure(text="Uploading activity")
         status_light.configure(bg="#ffb300")
-
-        status_light.after(
-            250,
-            lambda: status_light.configure(bg="#333333")
-        )
-
-        status_light.after(
-            500,
-            lambda: set_status(STATUS_CONNECTED)
-        )
-
+        status_light.after(250, lambda: status_light.configure(bg="#333333"))
+        status_light.after(500, lambda: status_light.configure(bg="#00cc44"))
     except Exception:
         pass
 
@@ -293,6 +289,31 @@ def send_activity_webhook(payload):
     except Exception as e:
         log.error("PalConLocker: activity webhook failed: %s", e)
 
+def queue_status(message):
+    global status_busy
+
+    status_queue.append(message)
+
+    if not status_busy:
+        show_next_status()
+
+
+def show_next_status():
+    global status_busy
+
+    if not status_label:
+        status_busy = False
+        return
+
+    if not status_queue:
+        status_busy = False
+        status_label.configure(text="Connected to PalConLocker")
+        return
+
+    status_busy = True
+    status_label.configure(text=status_queue.popleft())
+    status_label.after(5000, show_next_status)
+
 def notify_api(
     cmdr,
     system,
@@ -328,21 +349,100 @@ def notify_api(
 
     payload = {k: v for k, v in payload.items() if v is not None}
     send_activity_webhook(payload)
-
     flash_upload()
 
     try:
         r = requests.post(NOTIFY_URL, json=payload, timeout=5)
 
         if r.ok:
-            set_status(STATUS_CONNECTED)
+            if status_light:
+                status_light.configure(bg="#00cc44")
+
+            message = f"✓ {event} uploaded"
+
+            if event == "MissionAccepted":
+                message = f"✓ Accepted: {mission_type}"
+
+            elif event == "MissionCompleted":
+                message = f"✓ Completed: {mission_type}"
+
+            elif event in ("RedeemVoucher", "Bounty"):
+                value = int(amount or total_earnings or 0)
+                message = f"✓ Cashed {value:,} cr bounties"
+                if faction:
+                    message += f" ({faction})"
+
+            elif event in ("FactionKillBond", "CombatBond"):
+                value = int(amount or total_earnings or 0)
+                message = f"✓ Handed in {value:,} cr bonds"
+                if faction:
+                    message += f" ({faction})"
+
+            elif event == "MarketSell":
+                message = f"✓ Sold {amount or 0}t {commodity or ''}".strip()
+
+            elif event == "MarketBuy":
+                message = f"✓ Bought {amount or 0}t {commodity or ''}".strip()
+
+            elif event in ("SellExplorationData", "MultiSellExplorationData"):
+                value = int(total_earnings or amount or 0)
+                message = f"✓ Sold exploration data ({value:,} cr)"
+
+            elif event == "SellOrganicData":
+                value = int(total_earnings or amount or 0)
+                message = f"✓ Sold organic data ({value:,} cr)"
+
+            elif event.startswith("Powerplay"):
+                value = merits or amount or progress or 0
+                message = f"✓ Uploaded {value} merits"
+
+            queue_status(message)
+
         else:
             set_status(STATUS_FAILED)
-            log.error("PalConLocker: notify failed %s %s", r.status_code, r.text)
+            log.error(
+                "PalConLocker: notify failed %s %s | payload=%s",
+                r.status_code,
+                r.text,
+                payload
+            )
 
     except Exception as e:
         set_status(STATUS_FAILED)
         log.error("PalConLocker: exception sending notify: %s", e)
+
+def check_version():
+    try:
+        r = requests.get(LATEST_URL, timeout=5)
+
+        if not r.ok:
+            return
+
+        data = r.json() or {}
+
+        latest = str(data.get("version") or "").strip()
+        message = data.get("message") or ""
+        download = data.get("download_url") or ""
+
+        if not latest:
+            return
+
+        if latest != __version__:
+
+            if status_label:
+                if message:
+                    status_label.configure(text=f"📢 {message}")
+                else:
+                    status_label.configure(text=f"📢 Update available: v{latest}")
+
+            log.info(
+                "PalConLocker: update available v%s (%s)",
+                latest,
+                download
+            )
+
+    except Exception as e:
+        log.error("PalConLocker: version check failed: %s", e)
 
 
 def mission_effect_summary(entry):
@@ -402,6 +502,13 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
             log.info("PalConLocker: refreshed sectors from server.")
         except Exception as e:
             log.error("PalConLocker: sector refresh failed: %s", e)
+    # Check for plugin updates once per day
+    if time.time() - globals().get("last_version_check", 0) > 86400:
+        try:
+            check_version()
+            globals()["last_version_check"] = time.time()
+        except Exception as e:
+            log.error("PalConLocker: version check failed: %s", e)
 
     event = entry.get("event")
 
@@ -463,14 +570,14 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
             daemon=True
         ).start()
         return
-
+        
     if event == "MissionAccepted":
-        # Remember / log missions everywhere
         if not current_system:
             return
 
         faction = entry.get("Faction", "N/A")
         mission_name = entry.get("LocalisedName") or entry.get("Name") or "Mission Accepted"
+        reward = entry.get("Donation") or entry.get("Reward") or 0
 
         remember_mission(entry, current_system)
 
@@ -483,6 +590,7 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
                 "faction": faction,
                 "timestamp": ts,
                 "mission_type": mission_name,
+                "total_earnings": reward,
             },
             daemon=True
         ).start()
@@ -491,11 +599,8 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
     if event == "MissionCompleted":
         tracked = get_tracked_mission(entry)
 
-        # Log if hand-in system is watched OR mission was accepted in watched system.
-        if not tracked and (not current_system or current_system.lower() not in watched_systems):
-            return
-
         faction = entry.get("Faction") or (tracked or {}).get("faction", "N/A")
+
         mission_name = (
             entry.get("LocalisedName")
             or entry.get("Name")
@@ -504,15 +609,13 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
         )
 
         effects = mission_effect_summary(entry)
-
         if effects:
             mission_name = mission_name + "\n" + effects
 
         accepted_system = (tracked or {}).get("accepted_system")
         display_system = accepted_system or current_system
 
-        if accepted_system and current_system and accepted_system.lower() != current_system.lower():
-            mission_name = mission_name + "\nCompleted in: " + current_system
+        reward = entry.get("Reward") or entry.get("Donation") or entry.get("Donated") or 0
 
         threading.Thread(
             target=notify_api,
@@ -523,6 +626,26 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
                 "faction": faction,
                 "timestamp": ts,
                 "mission_type": mission_name,
+                "total_earnings": reward,
+            },
+            daemon=True
+        ).start()
+
+        forget_tracked_mission(entry)
+        return
+
+    if event in ("MissionFailed", "MissionAbandoned"):
+        tracked = get_tracked_mission(entry)
+
+        threading.Thread(
+            target=notify_api,
+            kwargs={
+                "cmdr": cmdr,
+                "system": current_system or (tracked or {}).get("accepted_system", ""),
+                "event": event,
+                "faction": entry.get("Faction") or (tracked or {}).get("faction", "N/A"),
+                "timestamp": ts,
+                "mission_type": entry.get("LocalisedName") or entry.get("Name") or (tracked or {}).get("mission_type"),
             },
             daemon=True
         ).start()
@@ -623,6 +746,8 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
 
 
 def plugin_start3(plugin_dir):
+    global last_sector_refresh
+    
     load_settings()
     load_tracked_missions()
     last_sector_refresh = 0
