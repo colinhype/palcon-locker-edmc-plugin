@@ -21,3 +21,14 @@ Download the latest release and replace the existing `PalConLocker` folder.
 ## Current version
 
 0.8.1
+
+## Changelog
+
+### v0.8.1
+- Initial public release
+- Commander activity uploads
+- Mission tracking
+- Trade tracking
+- Exploration tracking
+- Powerplay tracking
+- Sector watchlists
