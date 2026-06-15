@@ -2,6 +2,9 @@
 
 Uploads Elite Dangerous journal events from EDMarketConnector to PalCon Locker.
 
+Download the latest release from:
+https://github.com/colinhype/palcon-locker-edmc-plugin/releases/latest
+
 ## Install
 
 1. Download the latest release zip.
