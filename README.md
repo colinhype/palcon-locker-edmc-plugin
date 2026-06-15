@@ -20,6 +20,10 @@ Download the latest release and replace the existing `PalConLocker` folder.
 
 ## Current version
 
+0.8.2
+
+Fixed a startup issue that could cause the plugin to stop processing journal events for some commanders. Improves reliability of sector refreshes, mission tracking, and activity uploads. Recommended update for all users.
+
 0.8.1
 
 ## Changelog
