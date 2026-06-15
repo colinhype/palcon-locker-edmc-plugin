@@ -21,7 +21,7 @@ except ImportError:
 log = getLogger(__name__)
 
 __author__ = "Colinhype"
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 __description__ = "Feeds PalCon Locker CMDR activity via PHP API, with DB-backed sector watchlists."
 
 NOTIFY_URL = "https://palconlocker.com/api/notify.php"
