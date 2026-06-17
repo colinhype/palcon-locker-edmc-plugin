@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timezone
 from collections import deque
 
+
 try:
     from edmc_logging import getLogger
 except ImportError:
@@ -22,7 +23,7 @@ except ImportError:
 log = getLogger(__name__)
 
 __author__ = "Colinhype"
-__version__ = "0.8.2"
+__version__ = "0.8.3"
 __description__ = "Feeds PalCon Locker CMDR activity via PHP API, with DB-backed sector watchlists."
 
 NOTIFY_URL = "https://palconlocker.com/api/notify.php"
@@ -30,7 +31,15 @@ SECTORS_URL = "https://palconlocker.com/api/sectors.php"
 ACTIVITY_WEBHOOK_URL = "https://discord.com/api/webhooks/1514416142972747776/-j2Y2-VWrxO7Lg3gGVV1R-GZcAOxmMyexlXfFVFrCDV6eYbER0B5RpAWRBDB7_BNqVmP"
 LATEST_URL = "https://palconlocker.com/latest.json"
 
-PLUGIN_DIR = os.path.dirname(__file__)
+PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+
+plugin_dir_name = os.path.basename(PLUGIN_DIR)
+if plugin_dir_name.lower() != "palconlocker":
+    print(
+        f"⚠️ PalCon Locker installed in '{plugin_dir_name}'. "
+        "Recommended folder name is 'PalConLocker'."
+    )
+
 SETTINGS_FILE = os.path.join(PLUGIN_DIR, "palcon_settings.json")
 TRACKED_MISSIONS_FILE = os.path.join(PLUGIN_DIR, "palcon_tracked_missions.json")
 
@@ -154,7 +163,6 @@ def forget_tracked_mission(entry):
         tracked_missions.pop(key, None)
         save_tracked_missions()
 
-
 def plugin_app(parent):
     global status_light, status_label
 
@@ -225,7 +233,7 @@ def send_activity_webhook(payload):
     amount = payload.get("amount")
     merits = payload.get("merits")
     total_earnings = payload.get("total_earnings")
-
+    
     title_map = {
         "MissionAccepted": "📋 Mission accepted",
         "MissionCompleted": "✅ Mission completed",
@@ -235,8 +243,8 @@ def send_activity_webhook(payload):
         "MarketSell": "💰 Market sell",
         "RedeemVoucher": "🎯 Voucher redeemed",
         "Bounty": "🎯 Bounty claimed",
-        "FactionKillBond": "⚔️ Combat bond",
-        "CombatBond": "⚔️ Combat bond",
+        "FactionKillBond": "⚔️ Combat bond earned",
+        "CombatBond": "⚔️ Combat bond earned",
         "SellExplorationData": "🛰️ Exploration data sold",
         "MultiSellExplorationData": "🛰️ Exploration data sold",
         "SellOrganicData": "🌱 Organic data sold",
@@ -345,6 +353,7 @@ def notify_api(
         "trade_type": trade_type,
         "total_earnings": total_earnings,
         "progress": progress,
+        "plugin_version": __version__,
     }
 
     payload = {k: v for k, v in payload.items() if v is not None}
@@ -374,7 +383,7 @@ def notify_api(
 
             elif event in ("FactionKillBond", "CombatBond"):
                 value = int(amount or total_earnings or 0)
-                message = f"✓ Handed in {value:,} cr bonds"
+                message = f"⚔️ Combat Bonds Earned"
                 if faction:
                     message += f" ({faction})"
 
@@ -421,19 +430,15 @@ def check_version():
         data = r.json() or {}
 
         latest = str(data.get("version") or "").strip()
-        message = data.get("message") or ""
         download = data.get("download_url") or ""
 
         if not latest:
             return
 
         if latest != __version__:
-
-            if status_label:
-                if message:
-                    status_label.configure(text=f"📢 {message}")
-                else:
-                    status_label.configure(text=f"📢 Update available: v{latest}")
+            queue_status(
+                f"📢 Update available ({__version__} → {latest})"
+            )
 
             log.info(
                 "PalConLocker: update available v%s (%s)",
@@ -443,7 +448,6 @@ def check_version():
 
     except Exception as e:
         log.error("PalConLocker: version check failed: %s", e)
-
 
 def mission_effect_summary(entry):
     """
@@ -509,7 +513,6 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
             globals()["last_version_check"] = time.time()
         except Exception as e:
             log.error("PalConLocker: version check failed: %s", e)
-
     event = entry.get("event")
 
     tracked_events = {
