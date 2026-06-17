@@ -19,7 +19,7 @@ https://github.com/colinhype/palcon-locker-edmc-plugin/releases/latest
 Download the latest release and replace the existing `PalConLocker` folder.
 
 ## Current version
-###v0.8.3
+v0.8.3
 - Added plugin version reporting to PalCon Locker uploads.
 - Added server-side tracking of commander plugin versions.
 - Added update notification framework for future releases.
