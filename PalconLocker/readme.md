@@ -17,4 +17,4 @@ Download the latest release and replace the existing `PalConLocker` folder.
 
 ## Current version
 
-0.8.1
+0.8.3

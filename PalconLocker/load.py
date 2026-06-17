@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # PalConLocker EDMC Plugin
 # Save as:
-#   EDMC/Plugins/PalConLocker/load.py
+#   EDMC/Plugins/PalConLocker/load.py.
 
 import os
 import json
